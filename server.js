@@ -168,6 +168,7 @@ app.post('/api/terminal/pay', async (req, res) => {
       success: true,
       transactionId: sumupRes.data.id,
       status: sumupRes.data.status,
+      readerId: targetReaderId.trim(), // Handig om direct mee te sturen voor de printer
       message: 'Betaalverzoek verzonden naar de pinautomaat!'
     });
 
@@ -178,6 +179,45 @@ app.post('/api/terminal/pay', async (req, res) => {
       success: false,
       error: `SumUp weigert betaling: ${errorMsg}`
     });
+  }
+});
+
+// 6. SUMUP SOLO PRINTER ENDPOINT (Specifiek ontworpen voor de ingebouwde printer)
+app.post('/api/terminal/print-solo', async (req, res) => {
+  const { readerId, order, store } = req.body;
+
+  if (!readerId || !order) {
+    return res.status(400).json({ success: false, error: 'Reader ID en ordergegevens zijn vereist.' });
+  }
+
+  const storeName = store?.store_name || store?.name || 'BENDEMEN';
+  const storeKvk = store?.kvk || '82882851';
+
+  // Strak opgemaakte string specifiek voor het smalle papier van de SumUp Solo
+  const receiptText = `
+${storeName.toUpperCase()}
+KVK: ${storeKvk}
+--------------------------------
+Order: #${order.id || 'POS'}
+Datum: ${new Date().toLocaleString('nl-NL')}
+--------------------------------
+${(order.orderItems || []).map(i => `${i.name.padEnd(16)} x${i.quantity} \n  €${(parseFloat(i.price) * i.quantity).toFixed(2)}`).join('\n')}
+--------------------------------
+TOTAAL:      €${parseFloat(order.totals?.totalPaid || 0).toFixed(2)}
+--------------------------------
+Bedankt voor je aankoop!
+www.bendemen.nl
+  `.trim();
+
+  try {
+    await sumupAxios.post(`/merchants/${MERCHANT_CODE}/readers/${readerId}/print`, {
+      text: receiptText
+    });
+
+    return res.json({ success: true, message: 'Bon succesvol verzonden naar de SumUp Solo printer!' });
+  } catch (error) {
+    console.error('Solo Print Error:', error.response?.data || error.message);
+    return res.status(400).json({ success: false, error: 'Kon niet printen op de SumUp Solo.' });
   }
 });
 
