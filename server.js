@@ -24,8 +24,8 @@ const DEFAULT_READER_ID = process.env.SUMUP_READER_ID;
 // MySQL Database Pool voor locatie-koppelingen
 const db = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'bendemen',
-  password: process.env.DB_PASSWORD || 'Ben#de!men18',
+  user: process.env.DB_USER || '',
+  password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'bendemen_pos'
 });
 
