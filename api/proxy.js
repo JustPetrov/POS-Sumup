@@ -1,16 +1,26 @@
 const API = 'https://api.sumup.com';
 
-function cors(res) {
-  const origin = process.env.POS_ORIGIN || 'https://www.bendemen.com';
+function configuredOrigins() {
+  return String(process.env.POS_ORIGIN || 'https://www.bendemen.com')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function cors(req, res) {
+  const requestOrigin = req.headers.origin;
+  const origins = configuredOrigins();
+  const origin = requestOrigin && origins.includes(requestOrigin) ? requestOrigin : origins[0];
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
 function allowed(req) {
   const origin = req.headers.origin;
-  return !origin || origin === (process.env.POS_ORIGIN || 'https://www.bendemen.com');
+  return !origin || configuredOrigins().includes(origin);
 }
 
 async function call(path, options = {}) {
@@ -30,7 +40,7 @@ function merchantPath(merchant, suffix) {
 }
 
 export default async function handler(req, res) {
-  cors(res);
+  cors(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (!allowed(req)) return res.status(403).json({ success: false, error: 'Origin not allowed' });
 
@@ -40,9 +50,10 @@ export default async function handler(req, res) {
   if (!process.env.SUMUP_API_KEY || !merchant) return res.status(500).json({ success: false, error: 'SumUp credentials are not configured' });
 
   try {
-    if (action === 'readers' && req.method === 'GET') {
+    if ((action === 'readers' || action === 'sync') && req.method === 'GET') {
       const data = await call(merchantPath(merchant, '/readers'));
-      return res.status(200).json({ success: true, readers: data.items || data.data || [] });
+      const readers = Array.isArray(data.items) ? data.items : (Array.isArray(data.data) ? data.data : []);
+      return res.status(200).json({ success: true, readers, syncedAt: new Date().toISOString() });
     }
 
     if (action === 'reader-status' && readerId && req.method === 'GET') {
@@ -52,8 +63,11 @@ export default async function handler(req, res) {
 
     if (action === 'pair' && req.method === 'POST') {
       const { pairingCode, name, metadata = {} } = req.body || {};
-      if (!pairingCode || !name) return res.status(400).json({ success: false, error: 'pairingCode en name zijn verplicht' });
-      const data = await call(merchantPath(merchant, '/readers'), { method: 'POST', body: JSON.stringify({ pairing_code: String(pairingCode).trim(), name, metadata }) });
+      if (!pairingCode || !name) return res.status(400).json({ success: false, error: 'Pairing code en naam zijn verplicht.' });
+      const data = await call(merchantPath(merchant, '/readers'), {
+        method: 'POST',
+        body: JSON.stringify({ pairing_code: String(pairingCode).trim(), name: String(name).trim(), metadata }),
+      });
       return res.status(200).json({ success: true, reader: data?.data || data });
     }
 
@@ -62,23 +76,27 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
-    if (action === 'sync' && req.method === 'GET') {
-      const data = await call(merchantPath(merchant, '/readers'));
-      const readers = data.items || data.data || [];
-      return res.status(200).json({ success: true, readers, syncedAt: new Date().toISOString() });
-    }
-
     if (action === 'pay' && req.method === 'POST') {
       const body = req.body || {};
       const amount = Number(body.totalAmount ?? body.amount);
       const targetReaderId = String(body.readerId || readerId || '');
       if (!targetReaderId) return res.status(400).json({ success: false, error: 'Geen SumUp Solo gekoppeld aan dit apparaat.' });
-      if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ success: false, error: 'Ongeldig bedrag' });
+      if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ success: false, error: 'Ongeldig bedrag.' });
 
       const foreignId = String(body.foreignTransactionId || `bdm-${Date.now()}-${crypto.randomUUID()}`);
-      const affiliate = process.env.SUMUP_APP_ID && process.env.SUMUP_AFFILIATE_KEY ? { app_id: process.env.SUMUP_APP_ID, key: process.env.SUMUP_AFFILIATE_KEY, foreign_transaction_id: foreignId } : undefined;
-      const payload = { total_amount: { currency: 'EUR', minor_unit: 2, value: Math.round(amount * 100) }, description: body.description || 'Bendemen POS betaling', return_url: process.env.SUMUP_WEBHOOK_URL || `${process.env.PUBLIC_GATEWAY_URL || ''}/api/webhook`, ...(affiliate ? { affiliate } : {}) };
-      const checkoutResult = await call(merchantPath(merchant, `/readers/${encodeURIComponent(targetReaderId)}/checkout`), { method: 'POST', body: JSON.stringify(payload) });
+      const affiliate = process.env.SUMUP_APP_ID && process.env.SUMUP_AFFILIATE_KEY
+        ? { app_id: process.env.SUMUP_APP_ID, key: process.env.SUMUP_AFFILIATE_KEY, foreign_transaction_id: foreignId }
+        : undefined;
+      const payload = {
+        total_amount: { currency: 'EUR', minor_unit: 2, value: Math.round(amount * 100) },
+        description: body.description || 'Bendemen POS betaling',
+        ...(process.env.SUMUP_WEBHOOK_URL ? { return_url: process.env.SUMUP_WEBHOOK_URL } : {}),
+        ...(affiliate ? { affiliate } : {}),
+      };
+      const checkoutResult = await call(merchantPath(merchant, `/readers/${encodeURIComponent(targetReaderId)}/checkout`), {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
       const checkout = checkoutResult?.data || checkoutResult;
       if (!checkout?.client_transaction_id) throw new Error('SumUp gaf geen client_transaction_id terug.');
       return res.status(200).json({ success: true, pending: true, readerId: targetReaderId, clientTransactionId: checkout.client_transaction_id, checkout });
@@ -102,7 +120,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, result: data?.data || data });
     }
 
-    return res.status(400).json({ success: false, error: 'Onbekende of ongeldige SumUp actie' });
+    return res.status(400).json({ success: false, error: 'Onbekende of ongeldige SumUp actie.' });
   } catch (error) {
     console.error('[SUMUP GATEWAY]', error);
     return res.status(500).json({ success: false, error: error.message || 'SumUp Cloud API fout' });
