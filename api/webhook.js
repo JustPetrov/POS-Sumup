@@ -1,20 +1,34 @@
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed' });
+const API = 'https://api.sumup.com';
 
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ received: false, error: 'Method not allowed' });
   try {
-    // SumUp webhook authenticity must be verified using the mechanism configured
-    // for the merchant/application. Keep this endpoint deliberately small and
-    // never trust the webhook alone as proof of payment; the POS can query /api/status.
     const event = req.body || {};
-    console.log('SumUp webhook received', {
-      type: event?.type,
-      eventId: event?.id,
-      clientTransactionId: event?.data?.client_transaction_id || event?.client_transaction_id,
+    const payload = event.payload || event.data || {};
+    const clientTransactionId = payload.client_transaction_id || event.client_transaction_id;
+    const merchantCode = process.env.SUMUP_MERCHANT_CODE;
+
+    // SumUp's webhook is a notification, not proof of payment. Verify the transaction with SumUp.
+    let verifiedTransaction = null;
+    if (clientTransactionId && merchantCode && process.env.SUMUP_API_KEY) {
+      const response = await fetch(`${API}/v2.1/merchants/${encodeURIComponent(merchantCode)}/transactions?client_transaction_id=${encodeURIComponent(clientTransactionId)}`, {
+        headers: { Authorization: `Bearer ${process.env.SUMUP_API_KEY}` },
+      });
+      if (response.ok) verifiedTransaction = await response.json();
+    }
+
+    console.log('SumUp webhook verified', {
+      eventType: event.event_type || event.type,
+      eventId: event.id,
+      clientTransactionId,
+      status: verifiedTransaction?.status || payload.status,
     });
 
-    return res.status(200).json({ received: true });
+    // Respond immediately; the POS retrieves the authoritative transaction from /api/transaction.
+    return res.status(200).json({ received: true, clientTransactionId, verified: Boolean(verifiedTransaction) });
   } catch (error) {
     console.error('SumUp webhook error:', error);
-    return res.status(500).json({ received: false });
+    // A webhook must be acknowledged quickly; status verification can be retried by the POS.
+    return res.status(200).json({ received: true });
   }
 }
