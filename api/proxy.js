@@ -9,6 +9,7 @@ function configuredOrigins() {
   return [...new Set([
     'https://pos.bendemen.com',
     'https://www.bendemen.com',
+    'https://bendemen.com',
     ...configured,
   ])];
 }
@@ -19,10 +20,12 @@ function cors(req, res) {
   const origin = requestOrigin && origins.includes(requestOrigin)
     ? requestOrigin
     : origins[0];
+
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
   res.setHeader('Access-Control-Max-Age', '86400');
 }
 
@@ -34,7 +37,11 @@ function allowed(req) {
 async function call(path, options = {}) {
   const response = await fetch(`${API}${path}`, {
     ...options,
-    headers: { Authorization: `Bearer ${process.env.SUMUP_API_KEY}`, 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      Authorization: `Bearer ${process.env.SUMUP_API_KEY}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
   });
   const text = await response.text();
   let data = {};
