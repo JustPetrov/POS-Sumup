@@ -6,9 +6,6 @@ function configuredOrigins() {
     .map((value) => value.trim())
     .filter(Boolean);
 
-  // Keep both the live POS hostname and the existing www hostname allowed.
-  // This prevents browser CORS failures when the POS is opened on
-  // https://pos.bendemen.com.
   return [...new Set([
     'https://pos.bendemen.com',
     'https://www.bendemen.com',
@@ -19,7 +16,9 @@ function configuredOrigins() {
 function cors(req, res) {
   const requestOrigin = req.headers.origin;
   const origins = configuredOrigins();
-  const origin = requestOrigin && origins.includes(requestOrigin) ? requestOrigin : origins[0];
+  const origin = requestOrigin && origins.includes(requestOrigin)
+    ? requestOrigin
+    : origins[0];
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
