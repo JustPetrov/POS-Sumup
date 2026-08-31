@@ -1,10 +1,19 @@
 const API = 'https://api.sumup.com';
 
 function configuredOrigins() {
-  return String(process.env.POS_ORIGIN || 'https://www.bendemen.com')
+  const configured = String(process.env.POS_ORIGIN || '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
+
+  // Keep both the live POS hostname and the existing www hostname allowed.
+  // This prevents browser CORS failures when the POS is opened on
+  // https://pos.bendemen.com.
+  return [...new Set([
+    'https://pos.bendemen.com',
+    'https://www.bendemen.com',
+    ...configured,
+  ])];
 }
 
 function cors(req, res) {
