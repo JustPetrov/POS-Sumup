@@ -1,5 +1,6 @@
 const API = 'https://api.sumup.com';
 
+// CORS v3: POS host must receive its own Origin in the response.
 function configuredOrigins() {
   const configured = String(process.env.POS_ORIGIN || '')
     .split(',')
